@@ -53,10 +53,9 @@ jobs:
       - name: Run OpenCode against the discovered remote model
         run: |
           export GPU_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' remote-ollama)
-          mkdir -p "$RUNNER_TEMP/remote-project"
-          cd "$RUNNER_TEMP/remote-project"
+          cd "$GITHUB_WORKSPACE/packages/cli"
           printf '{"providers":{"ollama-remote":{"settings":{"baseURL":"http://%s:11434/v1"}}}}\n' "$GPU_HOST" > opencode.json
-          cli="$GITHUB_WORKSPACE/packages/cli/src/index.ts"
+          cli=src/index.ts
           model='ollama-remote/hf.co/unsloth/Qwen3-0.6B-GGUF:Q4_K_M'
           for i in {1..10}; do
             bun "$cli" models > catalog
