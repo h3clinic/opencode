@@ -1,5 +1,5 @@
 import type { ModelInfo } from "@opencode/client"
-import { createMemo, createSignal, Show } from "solid-js"
+import { createMemo, createSignal, onMount, Show } from "solid-js"
 import { useLocal } from "../context/local"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
@@ -7,6 +7,7 @@ import { DialogIntegration } from "./dialog-integration"
 import { Link } from "../ui/link"
 import { useToast } from "../ui/toast"
 import { huggingFaceModelID } from "./huggingface-model-id"
+import { DialogGGUF } from "./dialog-gguf"
 import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
@@ -20,6 +21,7 @@ import { FavoriteMarker, isFreeModel, prioritizeFavorites, sortModelOptions } fr
 export function DialogModel(props: { integrationID?: string }) {
   const local = useLocal()
   const dialog = useDialog()
+  onMount(() => dialog.setSize("large"))
   const newDesigns = useNewDesigns()
   const connected = useConnected()
 
@@ -60,6 +62,10 @@ export function DialogModel(props: { integrationID?: string }) {
     dialog.clear()
   }
 
+  function download() {
+    dialog.replace(() => <DialogGGUF onSelect={select} />)
+  }
+
   function connect() {
     dialog.replace(() => (
       <DialogIntegration
@@ -71,9 +77,9 @@ export function DialogModel(props: { integrationID?: string }) {
   return (
     <Show
       when={newDesigns() && !connected() && !props.integrationID}
-      fallback={<DialogConnectedModels integrationID={props.integrationID} onSelect={select} onConnect={connect} onAdd={addModel} />}
+      fallback={<DialogConnectedModels integrationID={props.integrationID} onSelect={select} onConnect={connect} onAdd={addModel} onDownload={download} />}
     >
-      <DialogFreeModels onSelect={select} onConnect={connect} onAdd={addModel} />
+      <DialogFreeModels onSelect={select} onConnect={connect} onAdd={addModel} onDownload={download} />
     </Show>
   )
 }
@@ -83,6 +89,7 @@ function DialogConnectedModels(props: {
   integrationID?: string
   onSelect: (providerID: string, modelID: string) => void
   onConnect: () => void
+  onDownload: () => void
   onAdd: () => void
 }) {
   const local = useLocal()
@@ -243,6 +250,13 @@ function DialogConnectedModels(props: {
       noMatchView={props.integrationID === "huggingface" ? <text>No matching Hugging Face model is available in this project.</text> : undefined}
       options={options()}
       actions={[
+        {
+          command: "model.dialog.download",
+          title: "Download and use",
+          bind: "alt+d",
+          selection: "none",
+          onTrigger: props.onDownload,
+        },
         {
           command: "model.dialog.add",
           title: "Add model",

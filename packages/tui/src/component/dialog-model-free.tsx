@@ -10,6 +10,7 @@ import { FavoriteMarker, ModelDetail, isFreeModel, prioritizeFavorites } from ".
 /** Model picker for users without a connected provider, under the "new-designs" experiment. */
 export function DialogFreeModels(props: {
   onSelect: (providerID: string, modelID: string) => void
+  onDownload: () => void
   onAdd: () => void
   onConnect: () => void
 }) {
@@ -59,6 +60,13 @@ export function DialogFreeModels(props: {
       description="Connect a provider for access to more models"
       options={options()}
       actions={[
+        {
+          command: "model.dialog.download",
+          title: "Download and use",
+          bind: "alt+d",
+          selection: "none",
+          onTrigger: props.onDownload,
+        },
         {
           command: "model.dialog.add",
           title: "Add model",
