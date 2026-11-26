@@ -535,6 +535,21 @@ ollama serve
 ollama pull qwen3:8b
 ```
 
+### Download from Hugging Face
+
+With Ollama running locally, open `/models` and choose **Download and use**. Pick a suggested model or paste a public
+Hugging Face GGUF repository. To request a particular quantization, append its Ollama tag:
+
+```text
+unsloth/Qwen3-0.6B-GGUF:Q4_K_M
+```
+
+Check the size, then confirm **Download and use**. Ollama stores the weights in its model directory. OpenCode selects the
+installed model for the session once Ollama reports chat and tool support and the model appears in the local catalog.
+An existing installation can be selected again without downloading it.
+
+### Other Ollama endpoints
+
 Point OpenCode at a remote or proxied Ollama server with `settings.baseURL`. Include `/v1`; OpenCode derives the native
 `/api/tags` and `/api/show` discovery paths from it. `apiKey` is optional and is sent as a bearer token to discovery and
 model requests.

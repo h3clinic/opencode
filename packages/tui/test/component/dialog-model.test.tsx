@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from "bun:test"
 import { InputRenderable } from "@opentui/core"
 import { DialogModel } from "../../src/component/dialog-model"
+import { checkCodingModel, pullGGUF } from "../../src/component/gguf-download"
 import { model, renderLocal } from "../fixture/local"
 import { directory, json } from "../fixture/tui-client"
 
@@ -122,7 +123,15 @@ test("checks the connection in the session location instead of the launch direct
           data: [
             { id: "opencode", name: "OpenCode", activation: "auto", package: "opencode" },
             ...(inSession
-              ? [{ id: "deepseek", name: "DeepSeek", integrationID: "deepseek", activation: "enabled", package: "deepseek" }]
+              ? [
+                  {
+                    id: "deepseek",
+                    name: "DeepSeek",
+                    integrationID: "deepseek",
+                    activation: "enabled",
+                    package: "deepseek",
+                  },
+                ]
               : []),
           ],
         })
@@ -225,24 +234,32 @@ test("Download and use confirms size before pulling and selects the discovered O
   await using setup = await renderLocal({
     fetch: (url) => {
       if (url.pathname === "/api/model")
-        return json({ location: { directory }, data: [model("first"), ...(pulled ? [{ ...model(id), providerID: "ollama" }] : [])] })
+        return json({
+          location: { directory },
+          data: [model("first"), ...(pulled ? [{ ...model(id), providerID: "ollama" }] : [])],
+        })
     },
   })
-  using fetch = spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const url = new URL(String(input))
-    if (url.pathname === "/api/models") return Response.json([{ id: repo }])
-    if (url.pathname === "/api/version") return Response.json({ version: "test" })
-    if (url.pathname.endsWith("/manifests/latest"))
-      return Response.json({ layers: [{ mediaType: "application/vnd.ollama.image.model", size: 1048576 }] })
-    if (url.pathname === "/api/pull") {
-      pulled = true
-      return new Response('{"status":"pulling","completed":9,"total":10}\n{"status":"success"}\n')
-    }
-    if (url.pathname === "/api/tags") return Response.json({ models: pulled ? [{ model: id }] : [] })
-    if (url.pathname === "/api/show")
-      return Response.json({ details: { format: "gguf" }, capabilities: ["completion", "tools"] })
-    throw new Error("Unexpected request: " + url)
-  })
+  using fetch = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async (input: RequestInfo | URL) => {
+        const url = new URL(String(input))
+        if (url.pathname === "/api/models") return Response.json([{ id: repo }])
+        if (url.pathname === "/api/version") return Response.json({ version: "test" })
+        if (url.pathname.endsWith("/manifests/latest"))
+          return Response.json({ layers: [{ mediaType: "application/vnd.ollama.image.model", size: 1048576 }] })
+        if (url.pathname === "/api/pull") {
+          pulled = true
+          return new Response('{"status":"pulling","completed":9,"total":10}\n{"status":"success"}\n')
+        }
+        if (url.pathname === "/api/tags") return Response.json({ models: pulled ? [{ model: id }] : [] })
+        if (url.pathname === "/api/show")
+          return Response.json({ details: { format: "gguf" }, capabilities: ["completion", "tools"] })
+        throw new Error("Unexpected request: " + url)
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    ),
+  )
   setup.dialog.replace(() => <DialogModel />)
   const frame = await setup.waitForFrame((frame) => frame.includes("Download and use"))
   const rows = frame.split("\n")
@@ -251,8 +268,32 @@ test("Download and use confirms size before pulling and selects the discovered O
   await setup.waitForFrame((frame) => frame.includes(repo))
   setup.mockInput.pressEnter()
   await setup.waitForFrame((frame) => frame.includes("Use local GGUF model") && frame.includes("GiB"))
+  expect(fetch).toHaveBeenCalled()
   expect(pulled).toBe(false)
   setup.mockInput.pressEnter()
   await setup.waitForFrame(() => setup.dialog.stack.length === 0)
   expect(setup.local.model.current()).toEqual({ providerID: "ollama", modelID: id })
+})
+
+test("an interrupted Ollama stream leaves the current model alone", async () => {
+  using request = spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response('{"status":"pulling","completed":4,"total":10}\n'),
+  )
+  const statuses: string[] = []
+  await expect(
+    pullGGUF("hf.co/test/model:latest", new AbortController().signal, (s) => statuses.push(s)),
+  ).rejects.toThrow("stopped before confirming")
+  expect(statuses).toEqual(["pulling 40%"])
+  expect(request).toHaveBeenCalledTimes(1)
+})
+
+test("rejects GGUF models without tool support and cloud-only models", async () => {
+  using request = spyOn(globalThis, "fetch")
+  for (const info of [
+    { capabilities: ["completion"] },
+    { capabilities: ["tools", "completion"], remote_host: "https://ollama.com" },
+  ]) {
+    request.mockResolvedValueOnce(Response.json({ details: { format: "gguf" }, ...info }))
+    await expect(checkCodingModel("example", new AbortController().signal)).rejects.toThrow("tool support")
+  }
 })

@@ -5,7 +5,9 @@ import { dirname, join } from "node:path"
 export const ollama = "http://127.0.0.1:11434"
 
 export function hubReference(input: string) {
-  const match = /^(?:https:\/\/(?:huggingface\.co|hf\.co)\/)?([\w-][\w.-]*\/[\w-][\w.-]*)(?::([\w-]+))?\/?$/i.exec(input.trim())
+  const match = /^(?:https:\/\/(?:huggingface\.co|hf\.co)\/)?([\w-][\w.-]*\/[\w-][\w.-]*)(?::([\w-]+))?\/?$/i.exec(
+    input.trim(),
+  )
   if (match) return { repo: match[1], tag: match[2] ?? "latest" }
 }
 
@@ -15,13 +17,17 @@ async function request(url: string, signal: AbortSignal, body?: object) {
     redirect: "error",
     ...(body && { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   })
-  if (!response.ok) throw new Error(`${new URL(url).hostname} returned ${response.status}: ${(await response.text()).slice(0, 180)}`)
+  if (!response.ok)
+    throw new Error(`${new URL(url).hostname} returned ${response.status}: ${(await response.text()).slice(0, 180)}`)
   return response
 }
 
 export async function popularGGUF(signal: AbortSignal): Promise<string[]> {
-  const response = await request("https://huggingface.co/api/models?filter=gguf&pipeline_tag=text-generation&sort=downloads&limit=40", signal)
-  const models = await response.json() as { id: string }[]
+  const response = await request(
+    "https://huggingface.co/api/models?filter=gguf&pipeline_tag=text-generation&sort=downloads&limit=40",
+    signal,
+  )
+  const models = (await response.json()) as { id: string }[]
   return models.map((model) => model.id).filter((id) => hubReference(id))
 }
 
@@ -32,10 +38,12 @@ export async function inspectGGUF(input: string, signal: AbortSignal) {
     throw new Error("Start Ollama on this computer (ollama serve), then retry.")
   })
   const response = await request(`https://huggingface.co/v2/${ref.repo}/manifests/${ref.tag}`, signal)
-  const manifest = await response.json() as { layers?: { mediaType: string; size: number }[] }
+  const manifest = (await response.json()) as { layers?: { mediaType: string; size: number }[] }
   const layers = manifest.layers ?? []
-  if (!layers.some((layer) => layer.mediaType === "application/vnd.ollama.image.model") ||
-      !layers.every((layer) => Number.isSafeInteger(layer.size) && layer.size > 0))
+  if (
+    !layers.some((layer) => layer.mediaType === "application/vnd.ollama.image.model") ||
+    !layers.every((layer) => Number.isSafeInteger(layer.size) && layer.size > 0)
+  )
     throw new Error("This repository or quantization has no Ollama-compatible GGUF manifest.")
   return { name: `hf.co/${ref.repo}:${ref.tag}`, bytes: layers.reduce((sum, layer) => sum + layer.size, 0) }
 }
@@ -64,7 +72,8 @@ export async function pullGGUF(name: string, signal: AbortSignal, progress: (sta
     const item = JSON.parse(line)
     if (item.error) throw new Error(String(item.error))
     success = item.status === "success"
-    const percent = item.total > 0 && typeof item.completed === "number" ? ` ${Math.floor(100 * item.completed / item.total)}%` : ""
+    const percent =
+      item.total > 0 && typeof item.completed === "number" ? ` ${Math.floor((100 * item.completed) / item.total)}%` : ""
     progress(String(item.status) + percent)
   }
   try {
@@ -83,15 +92,24 @@ export async function pullGGUF(name: string, signal: AbortSignal, progress: (sta
 }
 
 export async function installedGGUF(name: string, signal: AbortSignal) {
-  const { models } = await (await request(ollama + "/api/tags", signal)).json() as { models: { model: string }[] }
+  const { models } = (await (await request(ollama + "/api/tags", signal)).json()) as { models: { model: string }[] }
   return models.find((item) => item.model.toLowerCase() === name.toLowerCase())?.model
 }
 
 export async function checkCodingModel(name: string, signal: AbortSignal) {
-  const info = await (await request(ollama + "/api/show", signal, { model: name })).json() as {
-    capabilities?: string[]; remote_host?: string; remote_model?: string; details?: { format?: string }
+  const info = (await (await request(ollama + "/api/show", signal, { model: name })).json()) as {
+    capabilities?: string[]
+    remote_host?: string
+    remote_model?: string
+    details?: { format?: string }
   }
-  if (info.remote_host || info.remote_model || info.details?.format !== "gguf" ||
-      !["completion", "tools"].every((cap) => info.capabilities?.includes(cap)))
-    throw new Error("Ollama does not report local GGUF chat and tool support for this model. Choose a tool-capable coding model.")
+  if (
+    info.remote_host ||
+    info.remote_model ||
+    info.details?.format !== "gguf" ||
+    !["completion", "tools"].every((cap) => info.capabilities?.includes(cap))
+  )
+    throw new Error(
+      "Ollama does not report local GGUF chat and tool support for this model. Choose a tool-capable coding model.",
+    )
 }
