@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { InputRenderable } from "@opentui/core"
 import { DialogModel } from "../../src/component/dialog-model"
 import { model, renderLocal } from "../fixture/local"
 import { directory, json } from "../fixture/tui-client"
@@ -208,7 +209,8 @@ test("Add model opens Hugging Face and selects the pasted Hub model for this ses
   const rows = frame.split("\n")
   const y = rows.findIndex((row) => row.includes("Add model"))
   await setup.mockMouse.click(rows[y].indexOf("Add model"), y)
-  await setup.waitForFrame((frame) => frame.includes("Browse Hugging Face") && frame.includes("Another coder"))
+  await setup.waitForFrame((frame) => frame.includes("Browse Hugging") && frame.includes("Another coder"))
+  await setup.waitFor(() => setup.renderer.currentFocusedRenderable instanceof InputRenderable)
   await setup.mockInput.typeText("https://huggingface.co/" + id)
   await setup.waitForFrame((frame) => frame.includes("Qwen Coder") && !frame.includes("Another coder"))
   setup.mockInput.pressEnter()
