@@ -22,24 +22,31 @@ jobs:
       - if: ${{ !cancelled() }}
         run: bun typecheck
         working-directory: packages/tui
-      - name: Exercise a real GGUF pull and local generation
+      - run: bun test test/plugin/provider-ollama.test.ts
+        working-directory: packages/core
+      - name: Exercise a remote GGUF pull and generation with a separate local store
         if: ${{ !cancelled() }}
         run: |
           docker run -d --name ollama -p 127.0.0.1:11434:11434 ollama/ollama:0.13.5
+          docker run -d --name remote-ollama ollama/ollama:0.13.5
+          export GPU_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' remote-ollama)
+          for i in {1..30}; do curl -fsS http://$GPU_HOST:11434/api/version && break; sleep 1; done
           for i in {1..30}; do curl -fsS http://127.0.0.1:11434/api/version && break; sleep 1; done
           bun -e '
             import { inspectGGUF, installedGGUF, checkCodingModel, pullGGUF } from "./packages/tui/src/component/gguf-download"
             const signal = AbortSignal.timeout(300000)
-            const model = await inspectGGUF("unsloth/Qwen3-0.6B-GGUF:Q4_K_M", signal)
-            await pullGGUF(model.name, signal, () => {})
-            const name = await installedGGUF(model.name, signal)
+            const remote = {root:"http://" + process.env.GPU_HOST + ":11434", providerID:"ollama-remote"}
+            const model = await inspectGGUF("unsloth/Qwen3-0.6B-GGUF:Q4_K_M", signal, remote)
+            await pullGGUF(model.name, signal, () => {}, remote)
+            if (await installedGGUF(model.name, signal)) throw Error("Model leaked into local store")
+            const name = await installedGGUF(model.name, signal, remote)
             if (!name) throw new Error("Model missing after pull")
-            await checkCodingModel(name, signal)
-            const response = await fetch("http://127.0.0.1:11434/api/chat", { method: "POST", signal, body: JSON.stringify({
+            await checkCodingModel(name, signal, remote)
+            const response = await fetch(remote.root + "/v1/chat/completions", { method: "POST", signal, body: JSON.stringify({
               model: name, stream: false, messages: [{ role: "user", content: "Return a Python function that adds two numbers." }],
               think: false, options: { num_predict: 96 }
             }) })
             const body = await response.json()
-            if (!response.ok || !body.done || !body.message?.content?.trim()) throw new Error(JSON.stringify(body))
-            console.log(name, body.message.content)
+            if (!response.ok || !body.choices?.[0]?.message?.content?.trim()) throw new Error(JSON.stringify(body))
+            console.log(remote.root, name, body.choices[0].message.content)
           '
