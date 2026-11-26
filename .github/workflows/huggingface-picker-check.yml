@@ -1,0 +1,23 @@
+name: Hugging Face picker check
+on:
+  push:
+    branches: [check-huggingface-picker]
+permissions:
+  contents: read
+jobs:
+  picker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun test --timeout 30000 test/component/dialog-model.test.tsx
+        working-directory: packages/tui
+      - run: bun typecheck
+        working-directory: packages/tui
