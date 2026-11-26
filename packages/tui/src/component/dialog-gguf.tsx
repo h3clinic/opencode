@@ -82,7 +82,9 @@ export function DialogGGUF(props: { onSelect: (provider: string, model: string) 
       setStatus("Installed. Waiting for OpenCode to discover the local model…")
       const deadline = Date.now() + 90000
       while (!signal.aborted && Date.now() < deadline) {
-        await data.location.sync(location)
+        data.location.model.invalidate(location)
+        data.location.provider.invalidate(location)
+        await Promise.all([data.location.model.sync(location), data.location.provider.sync(location)])
         if (signal.aborted) return
         checkLocal()
         const match = data.location.model.list(location)?.find((entry) =>
@@ -108,7 +110,7 @@ export function DialogGGUF(props: { onSelect: (provider: string, model: string) 
   }>{(model) =>
     <DialogSelect title="Use local GGUF model" renderFilter={false}
       options={[
-        { title: model().installed ? "Use installed model" : "Download and use", value: "use", onSelect: useModel, disabled: busy() },
+        { title: model().installed ? "Use installed model" : "Download and use", value: "use", onSelect: useModel },
         { title: busy() ? "Cancel" : "Choose another model", value: "back", onSelect: () => {
           if (busy()) dialog.clear()
           else { setChoice(undefined); setStatus(""); setQuery("") }

@@ -253,6 +253,6 @@ test("Download and use confirms size before pulling and selects the discovered O
   await setup.waitForFrame((frame) => frame.includes("Use local GGUF model") && frame.includes("GiB"))
   expect(pulled).toBe(false)
   setup.mockInput.pressEnter()
-  await setup.waitFor(() => setup.dialog.stack.length === 0)
+  await setup.waitForFrame(() => setup.dialog.stack.length === 0)
   expect(setup.local.model.current()).toEqual({ providerID: "ollama", modelID: id })
 })
