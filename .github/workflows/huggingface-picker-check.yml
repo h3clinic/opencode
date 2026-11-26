@@ -21,3 +21,23 @@ jobs:
         working-directory: packages/tui
       - run: bun typecheck
         working-directory: packages/tui
+      - name: Exercise a real GGUF pull and local generation
+        run: |
+          docker run -d --name ollama -p 127.0.0.1:11434:11434 ollama/ollama:0.13.5
+          for i in {1..30}; do curl -fsS http://127.0.0.1:11434/api/version && break; sleep 1; done
+          bun -e '
+            import { inspectGGUF, installedGGUF, checkCodingModel, pullGGUF } from "./packages/tui/src/component/gguf-download"
+            const signal = AbortSignal.timeout(300000)
+            const model = await inspectGGUF("unsloth/Qwen3-0.6B-GGUF:Q4_K_M", signal)
+            await pullGGUF(model.name, signal, () => {})
+            const name = await installedGGUF(model.name, signal)
+            if (!name) throw new Error("Model missing after pull")
+            await checkCodingModel(name, signal)
+            const response = await fetch("http://127.0.0.1:11434/api/chat", { method: "POST", signal, body: JSON.stringify({
+              model: name, stream: false, messages: [{ role: "user", content: "Return a Python function that adds two numbers." }],
+              think: false, options: { num_predict: 96 }
+            }) })
+            const body = await response.json()
+            if (!response.ok || !body.done || !body.message?.content?.trim()) throw new Error(JSON.stringify(body))
+            console.log(name, body.message.content)
+          '
