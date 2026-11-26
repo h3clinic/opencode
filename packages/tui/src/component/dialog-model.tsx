@@ -1,9 +1,13 @@
 import type { ModelInfo } from "@opencode/client"
-import { createMemo, createSignal, Show } from "solid-js"
+import { createMemo, createSignal, onMount, Show } from "solid-js"
 import { useLocal } from "../context/local"
 import { DialogSelect } from "../ui/dialog-select"
 import { useDialog } from "../ui/dialog"
 import { DialogIntegration } from "./dialog-integration"
+import { Link } from "../ui/link"
+import { useToast } from "../ui/toast"
+import { huggingFaceModelID } from "./huggingface-model-id"
+import { DialogGGUF } from "./dialog-gguf"
 import { DialogVariant } from "./dialog-variant"
 import * as fuzzysort from "fuzzysort"
 import { useConnected } from "./use-connected"
@@ -17,8 +21,31 @@ import { FavoriteMarker, isFreeModel, prioritizeFavorites, sortModelOptions } fr
 export function DialogModel(props: { integrationID?: string }) {
   const local = useLocal()
   const dialog = useDialog()
+  onMount(() => dialog.setSize("large"))
   const newDesigns = useNewDesigns()
   const connected = useConnected()
+
+  const data = useData()
+  const location = useLocation()
+  const toast = useToast()
+
+  function addModel() {
+    const id = "huggingface"
+    const browse = () => dialog.replace(() => <DialogModel integrationID={id} />)
+    const integration = data.location.integration.list(location.ref)?.find((item) => item.id === id)
+    if (
+      integration?.connections.some((item) => !item.status) ||
+      data.location.model.list(location.ref)?.some((model) => model.providerID === id && model.enabled)
+    ) {
+      browse()
+      return
+    }
+    if (!integration) {
+      toast.show({ variant: "info", message: "Hugging Face is unavailable in this project." })
+      return
+    }
+    dialog.replace(() => <DialogIntegration integrationID={id} autoConnect onConnected={browse} />)
+  }
 
   function select(providerID: string, modelID: string) {
     local.model.set({ providerID, modelID }, { recent: true })
@@ -35,6 +62,10 @@ export function DialogModel(props: { integrationID?: string }) {
     dialog.clear()
   }
 
+  function download() {
+    dialog.replace(() => <DialogGGUF onSelect={select} />)
+  }
+
   function connect() {
     dialog.replace(() => (
       <DialogIntegration
@@ -46,9 +77,17 @@ export function DialogModel(props: { integrationID?: string }) {
   return (
     <Show
       when={newDesigns() && !connected() && !props.integrationID}
-      fallback={<DialogConnectedModels integrationID={props.integrationID} onSelect={select} onConnect={connect} />}
+      fallback={
+        <DialogConnectedModels
+          integrationID={props.integrationID}
+          onSelect={select}
+          onConnect={connect}
+          onAdd={addModel}
+          onDownload={download}
+        />
+      }
     >
-      <DialogFreeModels onSelect={select} onConnect={connect} />
+      <DialogFreeModels onSelect={select} onConnect={connect} onAdd={addModel} onDownload={download} />
     </Show>
   )
 }
@@ -58,6 +97,8 @@ function DialogConnectedModels(props: {
   integrationID?: string
   onSelect: (providerID: string, modelID: string) => void
   onConnect: () => void
+  onDownload: () => void
+  onAdd: () => void
 }) {
   const local = useLocal()
   const newDesigns = useNewDesigns()
@@ -99,6 +140,7 @@ function DialogConnectedModels(props: {
             model.providerID === props.integrationID ||
             providers().get(model.providerID)?.integrationID === props.integrationID,
         )
+        .filter((model) => props.integrationID !== "huggingface" || model.enabled)
         // A model's faster and slower speeds are chosen with the speed selector.
         .filter((model) => !local.model.isSpeed({ providerID: model.providerID, modelID: model.id }))
         .map((model) => {
@@ -130,6 +172,13 @@ function DialogConnectedModels(props: {
 
   const options = createMemo(() => {
     const needle = query().trim()
+    if (needle && props.integrationID === "huggingface") {
+      const id = huggingFaceModelID(needle)
+      if (id !== undefined) return modelOptions().filter((option) => option.value.modelID.toLowerCase() === id)
+      return fuzzysort
+        .go(needle, modelOptions(), { keys: ["title", (option) => option.value.modelID] })
+        .map((item) => item.obj)
+    }
     if (needle)
       return prioritizeFavorites(
         sortModelOptions(
@@ -199,17 +248,46 @@ function DialogConnectedModels(props: {
     () =>
       (props.integrationID &&
         data.location.integration.list(location.ref)?.find((item) => item.id === props.integrationID)?.name) ||
-      "Select model",
+      (props.integrationID === "huggingface" ? "Hugging Face models" : "Select model"),
   )
 
   return (
     <DialogSelect<ReturnType<typeof options>[number]["value"]>
       searchInTitle
-      titlePlaceholder="Search models"
+      titlePlaceholder={
+        props.integrationID === "huggingface" ? "Search or paste a Hugging Face model URL" : "Search models"
+      }
+      placeholder={props.integrationID === "huggingface" ? "Model name, ID, or Hub URL" : undefined}
+      footer={
+        props.integrationID === "huggingface" ? (
+          <Link href="https://huggingface.co/models?pipeline_tag=text-generation">Browse Hugging Face</Link>
+        ) : undefined
+      }
+      noMatchView={
+        props.integrationID === "huggingface" ? (
+          <text>No matching Hugging Face model is available in this project.</text>
+        ) : undefined
+      }
       options={options()}
       actions={[
         {
+          command: "model.dialog.download",
+          title: "Download and use",
+          bind: "alt+d",
+          selection: "none",
+          onTrigger: props.onDownload,
+        },
+        {
+          command: "model.dialog.add",
+          title: "Add model",
+          hidden: Boolean(props.integrationID),
+          bind: "ctrl+n",
+          selection: "none",
+          onTrigger: props.onAdd,
+        },
+        {
           command: "model.dialog.provider",
+          hidden: props.integrationID === "huggingface",
           title: newDesigns()
             ? connected()
               ? "connect integration"

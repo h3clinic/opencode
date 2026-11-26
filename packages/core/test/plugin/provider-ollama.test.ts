@@ -5,7 +5,7 @@ import { EnvironmentUnavailable } from "@opencode/core/environment/unavailable"
 import { Model } from "@opencode/core/model"
 import { Plugin } from "@opencode/core/plugin"
 import { PluginHost } from "@opencode/core/plugin/host"
-import { OllamaPlugin, make } from "@opencode/core/plugin/provider/ollama"
+import { OllamaPlugin, RemoteOllamaPlugin, make } from "@opencode/core/plugin/provider/ollama"
 import { ProviderPlugins } from "@opencode/core/plugin/provider"
 import { Provider } from "@opencode/core/provider"
 import { Document, Event, Info } from "@opencode/schema/config"
@@ -26,6 +26,48 @@ const addPlugin = Effect.fn(function* (origin: string, interval: Duration.Input 
 })
 
 describe("OllamaPlugin", () => {
+  it.live("discovers the configured remote under its own inference provider", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch(request) {
+            if (request.headers.get("authorization") !== "Bearer test-key") return new Response(null, { status: 401 })
+            if (new URL(request.url).pathname === "/gpu/api/tags")
+              return Response.json({ models: [summary("coder", "digest")] })
+            return Response.json(show({ capabilities: ["completion", "tools"], context: 8192 }))
+          },
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          const baseURL = server.url.origin + "/gpu/v1"
+          const config = yield* Config.Test
+          yield* config.setEntries([
+            new Document({
+              type: "document",
+              info: decode({
+                providers: {
+                  "ollama-remote": { settings: { baseURL, apiKey: "test-key" } },
+                },
+              }),
+            }),
+          ])
+          const plugin = yield* Plugin.Service
+          const host = yield* PluginHost.make(plugin, "test")
+          yield* RemoteOllamaPlugin.effect(host)
+          const models = yield* Model.Service
+          const providers = yield* Provider.Service
+          const remote = Provider.ID.make("ollama-remote")
+          const model = yield* eventually(models.get(remote, Model.ID.make("coder")), (model) => !!model)
+          expect(model?.capabilities.tools).toBe(true)
+          expect((yield* providers.get(remote))?.settings?.baseURL).toBe(baseURL)
+          expect(yield* models.get(Provider.ID.make("ollama"), Model.ID.make("coder"))).toBeUndefined()
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
   it.live("skips unconfigured default local discovery when the location has no local execution plane", () =>
     Effect.gen(function* () {
       const plugin = yield* Plugin.Service
