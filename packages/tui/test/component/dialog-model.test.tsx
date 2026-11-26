@@ -193,3 +193,25 @@ const freeCost = {
   output: 0,
   cache: { read: 0, write: 0 },
 }
+
+test("Add model opens Hugging Face and selects the pasted Hub model for this session", async () => {
+  const id = "Qwen/Qwen3-Coder-Next"
+  await using setup = await renderLocal({
+    models: [
+      model("first"),
+      { ...model(id), providerID: "huggingface", name: "Qwen Coder" },
+      { ...model("another/coder"), providerID: "huggingface", name: "Another coder" },
+    ],
+  })
+  setup.dialog.replace(() => <DialogModel />)
+  const frame = await setup.waitForFrame((frame) => frame.includes("Add model"))
+  const rows = frame.split("\n")
+  const y = rows.findIndex((row) => row.includes("Add model"))
+  await setup.mockMouse.click(rows[y].indexOf("Add model"), y)
+  await setup.waitForFrame((frame) => frame.includes("Browse Hugging Face") && frame.includes("Another coder"))
+  await setup.mockInput.typeText("https://huggingface.co/" + id)
+  await setup.waitForFrame((frame) => frame.includes("Qwen Coder") && !frame.includes("Another coder"))
+  setup.mockInput.pressEnter()
+  await setup.waitFor(() => setup.dialog.stack.length === 0)
+  expect(setup.local.model.current()).toEqual({ providerID: "huggingface", modelID: id })
+})
