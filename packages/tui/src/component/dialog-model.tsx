@@ -77,7 +77,15 @@ export function DialogModel(props: { integrationID?: string }) {
   return (
     <Show
       when={newDesigns() && !connected() && !props.integrationID}
-      fallback={<DialogConnectedModels integrationID={props.integrationID} onSelect={select} onConnect={connect} onAdd={addModel} onDownload={download} />}
+      fallback={
+        <DialogConnectedModels
+          integrationID={props.integrationID}
+          onSelect={select}
+          onConnect={connect}
+          onAdd={addModel}
+          onDownload={download}
+        />
+      }
     >
       <DialogFreeModels onSelect={select} onConnect={connect} onAdd={addModel} onDownload={download} />
     </Show>
@@ -167,7 +175,9 @@ function DialogConnectedModels(props: {
     if (needle && props.integrationID === "huggingface") {
       const id = huggingFaceModelID(needle)
       if (id !== undefined) return modelOptions().filter((option) => option.value.modelID.toLowerCase() === id)
-      return fuzzysort.go(needle, modelOptions(), { keys: ["title", (option) => option.value.modelID] }).map((item) => item.obj)
+      return fuzzysort
+        .go(needle, modelOptions(), { keys: ["title", (option) => option.value.modelID] })
+        .map((item) => item.obj)
     }
     if (needle)
       return prioritizeFavorites(
@@ -244,10 +254,20 @@ function DialogConnectedModels(props: {
   return (
     <DialogSelect<ReturnType<typeof options>[number]["value"]>
       searchInTitle
-      titlePlaceholder={props.integrationID === "huggingface" ? "Search or paste a Hugging Face model URL" : "Search models"}
+      titlePlaceholder={
+        props.integrationID === "huggingface" ? "Search or paste a Hugging Face model URL" : "Search models"
+      }
       placeholder={props.integrationID === "huggingface" ? "Model name, ID, or Hub URL" : undefined}
-      footer={props.integrationID === "huggingface" ? <Link href="https://huggingface.co/models?pipeline_tag=text-generation">Browse Hugging Face</Link> : undefined}
-      noMatchView={props.integrationID === "huggingface" ? <text>No matching Hugging Face model is available in this project.</text> : undefined}
+      footer={
+        props.integrationID === "huggingface" ? (
+          <Link href="https://huggingface.co/models?pipeline_tag=text-generation">Browse Hugging Face</Link>
+        ) : undefined
+      }
+      noMatchView={
+        props.integrationID === "huggingface" ? (
+          <text>No matching Hugging Face model is available in this project.</text>
+        ) : undefined
+      }
       options={options()}
       actions={[
         {
