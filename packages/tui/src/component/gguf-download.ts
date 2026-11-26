@@ -4,6 +4,16 @@ import { dirname, join } from "node:path"
 
 export const ollama = "http://127.0.0.1:11434"
 
+export type OllamaTarget = { providerID: string; root: string; apiKey?: string }
+export const localTarget: OllamaTarget = { providerID: "ollama", root: ollama }
+
+export function ollamaRoot(baseURL: string) {
+  const url = new URL(baseURL)
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+    throw new Error("Use an HTTP(S) Ollama base URL without embedded credentials, a query, or a fragment.")
+  return url.origin + url.pathname.replace(/\/+$/, "").replace(/\/(v1|api)$/, "")
+}
+
 export function hubReference(input: string) {
   const match = /^(?:https:\/\/(?:huggingface\.co|hf\.co)\/)?([\w-][\w.-]*\/[\w-][\w.-]*)(?::([\w-]+))?\/?$/i.exec(
     input.trim(),
@@ -11,11 +21,15 @@ export function hubReference(input: string) {
   if (match) return { repo: match[1], tag: match[2] ?? "latest" }
 }
 
-async function request(url: string, signal: AbortSignal, body?: object) {
+async function request(url: string, signal: AbortSignal, body?: object, apiKey?: string) {
   const response = await fetch(url, {
     signal,
     redirect: "error",
-    ...(body && { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+    headers: {
+      ...(body && { "Content-Type": "application/json" }),
+      ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
+    },
+    ...(body && { method: "POST", body: JSON.stringify(body) }),
   })
   if (!response.ok)
     throw new Error(`${new URL(url).hostname} returned ${response.status}: ${(await response.text()).slice(0, 180)}`)
@@ -31,12 +45,10 @@ export async function popularGGUF(signal: AbortSignal): Promise<string[]> {
   return models.map((model) => model.id).filter((id) => hubReference(id))
 }
 
-export async function inspectGGUF(input: string, signal: AbortSignal) {
+export async function inspectGGUF(input: string, signal: AbortSignal, target = localTarget) {
   const ref = hubReference(input)
   if (!ref) throw new Error("Enter a Hugging Face owner/model ID or model page URL.")
-  await request(ollama + "/api/version", signal).catch(() => {
-    throw new Error("Start Ollama on this computer (ollama serve), then retry.")
-  })
+  await request(target.root + "/api/version", signal, undefined, target.apiKey)
   const response = await request(`https://huggingface.co/v2/${ref.repo}/manifests/${ref.tag}`, signal)
   const manifest = (await response.json()) as { layers?: { mediaType: string; size: number }[] }
   const layers = manifest.layers ?? []
@@ -61,8 +73,13 @@ export async function freeModelSpace() {
   }
 }
 
-export async function pullGGUF(name: string, signal: AbortSignal, progress: (status: string) => void) {
-  const response = await request(ollama + "/api/pull", signal, { model: name, stream: true })
+export async function pullGGUF(
+  name: string,
+  signal: AbortSignal,
+  progress: (status: string) => void,
+  target = localTarget,
+) {
+  const response = await request(target.root + "/api/pull", signal, { model: name, stream: true }, target.apiKey)
   if (!response.body) throw new Error("Ollama returned an empty download response.")
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let pending = ""
@@ -91,13 +108,15 @@ export async function pullGGUF(name: string, signal: AbortSignal, progress: (sta
   if (!success) throw new Error("Ollama stopped before confirming the download. Retry to resume.")
 }
 
-export async function installedGGUF(name: string, signal: AbortSignal) {
-  const { models } = (await (await request(ollama + "/api/tags", signal)).json()) as { models: { model: string }[] }
+export async function installedGGUF(name: string, signal: AbortSignal, target = localTarget) {
+  const { models } = (await (await request(target.root + "/api/tags", signal, undefined, target.apiKey)).json()) as {
+    models: { model: string }[]
+  }
   return models.find((item) => item.model.toLowerCase() === name.toLowerCase())?.model
 }
 
-export async function checkCodingModel(name: string, signal: AbortSignal) {
-  const info = (await (await request(ollama + "/api/show", signal, { model: name })).json()) as {
+export async function checkCodingModel(name: string, signal: AbortSignal, target = localTarget) {
+  const info = (await (await request(target.root + "/api/show", signal, { model: name }, target.apiKey)).json()) as {
     capabilities?: string[]
     remote_host?: string
     remote_model?: string
