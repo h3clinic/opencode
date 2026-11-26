@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { createLocalProviderPlugin } from "./local.js"
+import { createLocalProviderPlugin, type LocalDiscoveryClient } from "./local.js"
 
 const Details = Schema.Struct({
   parent_model: Schema.String.pipe(Schema.optional),
@@ -41,13 +41,13 @@ type ShowCache = {
 
 const shows = new Map<string, ShowCache>()
 
-export const make = createLocalProviderPlugin({
+const local = {
   id: "opencode.provider.ollama",
   providerID: "ollama",
   name: "Ollama",
   origin: "http://127.0.0.1:11434",
   stripPathSuffix: /\/(?:v1|api)$/,
-  discover: (client) =>
+  discover: (client: LocalDiscoveryClient) =>
     Effect.gen(function* () {
       const cached = shows.get(client.root)
       const previous = cached && cached.apiKey === client.apiKey ? cached.entries : new Map()
@@ -77,7 +77,7 @@ export const make = createLocalProviderPlugin({
           model !== undefined && (model.show.capabilities?.includes("completion") ?? false),
       )
     }),
-  model: (item) => ({
+  model: (item: DiscoveredModel) => ({
     id: item.model,
     name: item.name || item.model,
     family: item.show.details?.family || item.details.family,
@@ -87,6 +87,15 @@ export const make = createLocalProviderPlugin({
       key.endsWith(".context_length") && typeof value === "number" && value > 0 ? [value] : [],
     )[0],
   }),
-})
+}
+
+export const make = createLocalProviderPlugin(local)
+export const RemoteOllamaPlugin = createLocalProviderPlugin({
+  ...local,
+  id: "opencode.provider.ollama-remote",
+  providerID: "ollama-remote",
+  name: "Remote Ollama",
+  origin: undefined,
+})()
 
 export const OllamaPlugin = make()
