@@ -231,7 +231,7 @@ function DialogConnectedModels(props: {
     () =>
       (props.integrationID &&
         data.location.integration.list(location.ref)?.find((item) => item.id === props.integrationID)?.name) ||
-      "Select model",
+      (props.integrationID === "huggingface" ? "Hugging Face models" : "Select model"),
   )
 
   return (
@@ -253,6 +253,7 @@ function DialogConnectedModels(props: {
         },
         {
           command: "model.dialog.provider",
+          hidden: props.integrationID === "huggingface",
           title: newDesigns()
             ? connected()
               ? "connect integration"
