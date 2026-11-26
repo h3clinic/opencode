@@ -3,19 +3,17 @@ import WebKit
 
 typealias Message = [String: Any]
 
-final class Browser: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, NSTextFieldDelegate {
+final class Browser: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavigationDelegate, NSTextFieldDelegate, NSTabViewDelegate {
     let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
     let terminal = WKWebView()
-    let page: WKWebView = {
-        let config = WKWebViewConfiguration()
-        config.websiteDataStore = .nonPersistent()
-        return WKWebView(frame: .zero, configuration: config)
-    }()
+    let tabs = NSTabView()
+    let storage = WKWebsiteDataStore.nonPersistent()
+    var observers: [String: [NSKeyValueObservation]] = [:]
+    var selected: WKWebView? { tabs.selectedTabViewItem?.view as? WKWebView }
     let address = NSTextField()
     var window: NSWindow!
-    var observer: NSKeyValueObservation?
     var pageScript = ""
-    var loading: (navigation: WKNavigation, id: String)?
+    var loading: [ObjectIdentifier: (navigation: WKNavigation, id: String)] = [:]
 
     func emit(_ message: Message) {
         guard var data = try? JSONSerialization.data(withJSONObject: message) else { return }
@@ -27,20 +25,24 @@ final class Browser: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WK
         pageScript = (try? String(contentsOf: root.appendingPathComponent("page.js"), encoding: .utf8)) ?? ""
         terminal.configuration.userContentController.add(self, name: "terminal")
         terminal.navigationDelegate = self
-        page.navigationDelegate = self
+        tabs.delegate = self
+        _ = newTab()
         address.placeholderString = "Enter a web address"
         address.target = self
         address.action = #selector(openAddress)
         address.delegate = self
-        observer = page.observe(\.url, options: [.new]) { [weak self] page, _ in
-            self?.address.stringValue = page.url?.absoluteString ?? ""
-        }
         let back = NSButton(title: "Back", target: self, action: #selector(goBack))
         let forward = NSButton(title: "Forward", target: self, action: #selector(goForward))
-        let bar = NSStackView(views: [back, forward, address])
+        let add = NSButton(title: "+", target: self, action: #selector(addTab))
+        add.toolTip = "New tab"
+        add.setAccessibilityLabel("New tab")
+        let close = NSButton(title: "×", target: self, action: #selector(closeSelected))
+        close.toolTip = "Close current tab"
+        close.setAccessibilityLabel("Close current tab")
+        let bar = NSStackView(views: [back, forward, address, add, close])
         bar.edgeInsets = NSEdgeInsets(top: 5, left: 6, bottom: 5, right: 6)
         address.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let right = NSStackView(views: [bar, page])
+        let right = NSStackView(views: [bar, tabs])
         right.orientation = .vertical
         right.alignment = .width
         right.spacing = 0
@@ -78,16 +80,52 @@ final class Browser: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WK
         let url = action.request.url
         let allowed = view === terminal ? url == root.appendingPathComponent("terminal.html") :
             ["https", "http", "about"].contains(url?.scheme?.lowercased() ?? "")
-        if view === page, allowed, action.targetFrame == nil {
+        if view !== terminal, allowed, action.targetFrame == nil {
             decisionHandler(.cancel)
-            page.load(action.request)
+            if let page = newTab().view as? WKWebView { page.load(action.request) }
         } else { decisionHandler(allowed ? .allow : .cancel) }
     }
-    @objc func goBack() { page.goBack() }
-    @objc func goForward() { page.goForward() }
+    func newTab() -> NSTabViewItem {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = storage
+        let page = WKWebView(frame: .zero, configuration: config)
+        page.navigationDelegate = self
+        let id = UUID().uuidString
+        let item = NSTabViewItem(identifier: id)
+        item.label = "New tab"
+        item.view = page
+        observers[id] = [
+            page.observe(\.url) { [weak self] page, _ in
+                if self?.selected === page { self?.address.stringValue = page.url?.absoluteString ?? "" }
+                if page.title?.isEmpty != false { item.label = page.url?.host ?? "New tab" }
+            },
+            page.observe(\.title) { page, _ in item.label = page.title ?? page.url?.host ?? "New tab" }
+        ]
+        tabs.addTabViewItem(item)
+        tabs.selectTabViewItem(item)
+        return item
+    }
+    func closeTab(_ item: NSTabViewItem) {
+        if let page = item.view as? WKWebView {
+            if let request = loading.removeValue(forKey: ObjectIdentifier(page)) {
+                emit(["id":request.id,"error":"Tab closed."])
+            }
+            page.stopLoading()
+        }
+        if let id = item.identifier as? String { observers.removeValue(forKey: id) }
+        tabs.removeTabViewItem(item)
+        if tabs.numberOfTabViewItems == 0 { _ = newTab() }
+    }
+    func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
+        address.stringValue = (tabViewItem?.view as? WKWebView)?.url?.absoluteString ?? ""
+    }
+    @objc func addTab() { _ = newTab(); window.makeFirstResponder(address) }
+    @objc func closeSelected() { if let item = tabs.selectedTabViewItem { closeTab(item) } }
+    @objc func goBack() { selected?.goBack() }
+    @objc func goForward() { selected?.goForward() }
     @objc func openAddress() {
         let raw = address.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let url = webURL(raw.contains("://") ? raw : "https://" + raw) { page.load(URLRequest(url: url)) }
+        if let url = webURL(raw.contains("://") ? raw : "https://" + raw) { selected?.load(URLRequest(url: url)) }
     }
     func webURL(_ value: String) -> URL? {
         guard let url = URL(string: value), let scheme = url.scheme?.lowercased(),
@@ -102,32 +140,56 @@ final class Browser: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WK
         }
         guard let id = message["id"] as? String, let op = message["operation"] as? String,
               let args = message["args"] as? Message else { return }
+        if op == "tabs_list" {
+            let inventory: [Message] = tabs.tabViewItems.map { item in
+                ["tabID": item.identifier as? String ?? "", "title": item.label,
+                 "url": (item.view as? WKWebView)?.url?.absoluteString ?? "about:blank",
+                 "selected": item === tabs.selectedTabViewItem]
+            }
+            emit(["id":id,"value":inventory]); return
+        }
+        if op == "tabs_open" {
+            let item = newTab()
+            emit(["id":id,"value":["tabID":item.identifier as? String ?? ""]]); return
+        }
+        let item: NSTabViewItem?
+        if let target = args["tabID"] as? String {
+            item = tabs.tabViewItems.first { $0.identifier as? String == target }
+        } else { item = tabs.selectedTabViewItem }
+        guard let tab = item, let page = tab.view as? WKWebView else {
+            emit(["id":id,"error":"Unknown tab. List the open tabs again."]); return
+        }
+        if op == "tabs_focus" || op == "tabs_close" {
+            if op == "tabs_focus" { tabs.selectTabViewItem(tab) } else { closeTab(tab) }
+            emit(["id":id,"value":["performed":op]]); return
+        }
+        let key = ObjectIdentifier(page)
         if op == "navigate" {
             guard let url = webURL(args["url"] as? String ?? "") else {
                 emit(["id": id,"error": "Enter an HTTP or HTTPS URL."]); return
             }
-            if let prior = loading { emit(["id": prior.id,"error":"Navigation replaced."]) }
-            loading = nil
-            if let nav = page.load(URLRequest(url: url)) { loading = (nav, id) }
+            if let prior = loading.removeValue(forKey: key) { emit(["id": prior.id,"error":"Navigation replaced."]) }
+            if let nav = page.load(URLRequest(url: url)) { loading[key] = (nav, id) }
             else { emit(["id":id,"error":"Could not start navigation."]) }
             return
         }
         page.callAsyncJavaScript(pageScript, arguments: ["operation":op,"args":args], in: nil, in: .defaultClient) { result in
             switch result {
-            case .success(let value): self.emit(["id": id,"value": value ?? NSNull()])
+            case .success(let value): self.emit(["id": id,"value": value])
             case .failure(let error): self.emit(["id": id,"error": error.localizedDescription])
             }
         }
     }
-    func finish(_ nav: WKNavigation?, _ error: Error? = nil) {
-        guard let current = loading, current.navigation === nav else { return }
-        loading = nil
+    func finish(_ page: WKWebView, _ nav: WKNavigation?, _ error: Error? = nil) {
+        let key = ObjectIdentifier(page)
+        guard let current = loading[key], current.navigation === nav else { return }
+        loading.removeValue(forKey: key)
         if let error = error { emit(["id":current.id,"error":error.localizedDescription]) }
         else { emit(["id":current.id,"value":["url":page.url?.absoluteString ?? ""]]) }
     }
-    func webView(_ view: WKWebView, didFinish nav: WKNavigation!) { if view === page { finish(nav) } }
-    func webView(_ view: WKWebView, didFail nav: WKNavigation!, withError error: Error) { finish(nav,error) }
-    func webView(_ view: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) { finish(nav,error) }
+    func webView(_ view: WKWebView, didFinish nav: WKNavigation!) { finish(view,nav) }
+    func webView(_ view: WKWebView, didFail nav: WKNavigation!, withError error: Error) { finish(view,nav,error) }
+    func webView(_ view: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) { finish(view,nav,error) }
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
