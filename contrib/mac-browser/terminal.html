@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>OpenCode</title>
+<link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
+<style>html,body,#terminal{height:100%;margin:0;background:#101010}#terminal{box-sizing:border-box;padding:5px}</style>
+<div id="terminal"></div>
+<script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script>
+const terminal = new Terminal({fontFamily:'Menlo, monospace',fontSize:13,theme:{background:'#101010'}});
+const fit = new FitAddon.FitAddon();
+const send = data => window.webkit.messageHandlers.terminal.postMessage(data);
+terminal.loadAddon(fit);
+terminal.open(document.getElementById('terminal'));
+terminal.onData(data => send({kind:'input',data}));
+terminal.onResize(({rows,cols}) => send({kind:'resize',rows,cols}));
+window.output = data => terminal.write(Uint8Array.from(atob(data), c => c.charCodeAt(0)));
+new ResizeObserver(() => fit.fit()).observe(document.body);
+fit.fit();
+terminal.focus();
+send({kind:'ready'});
+</script></html>
