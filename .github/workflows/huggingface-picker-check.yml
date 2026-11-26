@@ -19,9 +19,11 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test --timeout 30000 test/component/dialog-model.test.tsx
         working-directory: packages/tui
-      - run: bun typecheck
+      - if: ${{ !cancelled() }}
+        run: bun typecheck
         working-directory: packages/tui
       - name: Exercise a real GGUF pull and local generation
+        if: ${{ !cancelled() }}
         run: |
           docker run -d --name ollama -p 127.0.0.1:11434:11434 ollama/ollama:0.13.5
           for i in {1..30}; do curl -fsS http://127.0.0.1:11434/api/version && break; sleep 1; done
