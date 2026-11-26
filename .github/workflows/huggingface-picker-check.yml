@@ -50,3 +50,21 @@ jobs:
             if (!response.ok || !body.choices?.[0]?.message?.content?.trim()) throw new Error(JSON.stringify(body))
             console.log(remote.root, name, body.choices[0].message.content)
           '
+      - name: Run OpenCode against the discovered remote model
+        run: |
+          export GPU_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' remote-ollama)
+          mkdir -p "$RUNNER_TEMP/remote-project"
+          cd "$RUNNER_TEMP/remote-project"
+          printf '{"providers":{"ollama-remote":{"settings":{"baseURL":"http://%s:11434/v1"}}}}\n' "$GPU_HOST" > opencode.json
+          cli="$GITHUB_WORKSPACE/packages/cli/src/index.ts"
+          model='ollama-remote/hf.co/unsloth/Qwen3-0.6B-GGUF:Q4_K_M'
+          for i in {1..10}; do
+            bun "$cli" models > catalog
+            grep -Fxi "$model" catalog && break
+            sleep 3
+          done
+          actual=$(grep -Fxi "$model" catalog)
+          timeout 180 bun "$cli" run --model "$actual" 'Reply with just the Python expression for the sum of 2 and 3. Do not call tools.' > answer
+          test -s answer
+          docker logs remote-ollama 2>&1 | grep -E 'POST +"/v1/chat/completions"' | tail -2
+          cat answer
