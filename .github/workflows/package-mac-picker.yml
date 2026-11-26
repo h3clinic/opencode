@@ -1,25 +1,24 @@
 name: Package macOS picker
 on:
   push:
-    branches: [package-mac-picker]
+    branches: [package-mac-picker-cross]
 permissions:
   contents: read
 jobs:
   mac:
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: package.json
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --os="*" --cpu="*"
       - working-directory: packages/cli
         run: |
-          test "$(uname -m)" = arm64
-          bun run script/build.ts --single --skip-install --skip-web-ui
+          OPENCODE_TARGET=darwin-arm64 bun run script/build.ts --single --skip-install --skip-web-ui
           bin=dist/cli-darwin-arm64/bin/opencode
-          "$bin" --version
+          file "$bin" | grep arm64
           cd "$(dirname "$bin")"
           tar -czf "$RUNNER_TEMP/opencode-mac.tgz" opencode
           shasum -a 256 opencode > "$RUNNER_TEMP/opencode.sha256"
