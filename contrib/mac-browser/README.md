@@ -14,3 +14,7 @@ python3 launch.py "$BIN_DIR" "$WORKSPACE"
 Drag the divider to resize the panes. Enter an HTTP or HTTPS address on the right, or ask the agent to open one. The launcher supplies its MCP config for this process and leaves the project's model selection in place.
 
 Use + to open a blank tab, click its title to switch, and × to close the selected tab. Closing the last tab opens a fresh blank one. To exercise tab routing in a running companion, run `OPENCODE_SIDEBROWSER_SOCKET=/path/to/session/browser.sock node tabs-test.mjs`. The test serves two loopback pages and restores the original tab.
+
+## System default browser
+
+Run `python3 default_browser.py "$BIN_DIR" "$WORKSPACE"` to open the default macOS HTTPS browser alongside the TUI in its own native window. Chrome, Chromium, Brave and Edge use Playwright MCP connected to a temporary browser profile on loopback. The browser and agent share native tabs for the lifetime of the session. Other HTTPS handlers launch normally with manual browsing. Use the WebKit launcher above for integrated MCP control in that case.

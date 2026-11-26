@@ -5,6 +5,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
+    "@playwright/mcp": "0.0.86",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "zod": "4.6.7"

@@ -191,6 +191,14 @@ final class Browser: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WK
     func webView(_ view: WKWebView, didFail nav: WKNavigation!, withError error: Error) { finish(view,nav,error) }
     func webView(_ view: WKWebView, didFailProvisionalNavigation nav: WKNavigation!, withError error: Error) { finish(view,nav,error) }
 }
+if CommandLine.arguments.dropFirst().first == "--default-browser" {
+    guard let url = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!),
+          let bundle = Bundle(url: url), let executable = bundle.executableURL,
+          let identifier = bundle.bundleIdentifier else { exit(1) }
+    let result = ["application":url.path,"executable":executable.path,"identifier":identifier]
+    FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result))
+    exit(0)
+}
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 let browser = Browser()
